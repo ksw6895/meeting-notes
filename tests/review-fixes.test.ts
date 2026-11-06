@@ -93,6 +93,17 @@ describe("fixes from the pre-release review", () => {
     expect((await app.inject({ method: "GET", url: "/api/settings" })).json().liveModel).toBe(before.liveModel);
   });
 
+  it("deletes only the chosen record when an imported event holds several lectures", async () => {
+    db.prepare("INSERT INTO events(id,title,budget_usd,created_at,updated_at) VALUES('legacy-event','학회',20,'x','x')").run();
+    for (const id of ["legacy-a", "legacy-b"]) {
+      db.prepare("INSERT INTO lectures(id,event_id,title,kind,status,created_at,updated_at) VALUES(?, 'legacy-event', ?, 'lecture', 'complete', 'x', 'x')").run(id, id);
+    }
+    expect((await app.inject({ method: "DELETE", url: "/api/lectures/legacy-a" })).statusCode).toBe(204);
+    expect(db.prepare("SELECT id FROM lectures WHERE event_id='legacy-event'").all()).toEqual([{ id: "legacy-b" }]);
+    expect((await app.inject({ method: "DELETE", url: "/api/lectures/legacy-b" })).statusCode).toBe(204);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE id='legacy-event'").get()).toEqual({ n: 0 });
+  });
+
   it("stores data outside the repository by default", async () => {
     const { defaultDataDir } = await import("../server/db.ts");
     const dir = defaultDataDir();

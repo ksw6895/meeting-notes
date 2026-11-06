@@ -162,8 +162,11 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     // meeting must then stay listed so the user can retry instead of leaving audio behind.
     try { removeLectureAudioFiles(lectureId); }
     catch { throw conflict("음성 파일을 처리하는 중이라 지금은 지울 수 없습니다. 잠시 후 다시 시도하세요."); }
-    // Each meeting owns exactly one event row; deleting it cascades to every table.
-    db.prepare("DELETE FROM events WHERE id=?").run(lecture.event_id);
+    // A meeting owns its event row, so deleting the event cascades. Records imported from the
+    // older lecture app can share one event with other lectures: then remove only this one.
+    const siblings = (db.prepare("SELECT COUNT(*) AS n FROM lectures WHERE event_id=? AND id!=?").get(lecture.event_id, lectureId) as { n: number }).n;
+    if (siblings) db.prepare("DELETE FROM lectures WHERE id=?").run(lectureId);
+    else db.prepare("DELETE FROM events WHERE id=?").run(lecture.event_id);
     return reply.code(204).send();
   });
 

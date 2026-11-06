@@ -191,7 +191,8 @@ export default function App() {
  const elapsed=recording?startedAt.base+(Date.now()-startedAt.at):detail?.recordedMs||0;
  const blocked=Boolean(busy||!online),canStart=detail&&!elsewhere&&(['draft','paused'].includes(detail.status)||orphaned);
  const pending=detail?.chunks.filter(c=>c.status!=='done')||[],failed=pending.filter(c=>['failed','budget_blocked'].includes(c.status));
- const noteJob=detail?.noteJobs?.find(j=>j.kind===(detail.status==='processing'?'final':'live'));
+ // A finished meeting has nothing left to refresh, so leftover job errors are not shown.
+ const noteJob=detail&&detail.status!=='complete'?detail.noteJobs?.find(j=>j.kind===(detail.status==='processing'?'final':'live')):undefined;
  const liveUpdating=noteJob?.state==='updating';
  const filtered=meetings.filter(m=>`${m.title} ${m.speaker}`.toLowerCase().includes(search.toLowerCase()));
  const visibleSegments=detail?.segments.filter(s=>!transcriptSearch||(s.overrideText||s.rawText).toLowerCase().includes(transcriptSearch.toLowerCase()))||[];
