@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { db, eventCostUsd, mapLecture } from './db.ts';
+import { db, defaultCaptionMode, eventCostUsd, mapLecture } from './db.ts';
 import { forceCloseAudioWriter, hasLiveAudioLease } from './audio.ts';
 import { noteJobs, retryNotes } from './note-jobs.ts';
 import { id, now } from './utils.ts';
@@ -39,8 +39,8 @@ export async function registerMeetings(app: FastifyInstance) {
       // Meetings have no spending cap (budget 0 = unlimited); the ledger still records every call.
       db.prepare(`INSERT INTO events(id,title,organization,topic,glossary,consent_confirmed,budget_usd,created_at,updated_at) VALUES(?,?, '',?,?,0,0,?,?)`)
         .run(eventId, title, String(body.topic || ''), String(body.glossary || ''), timestamp, timestamp);
-      db.prepare(`INSERT INTO lectures(id,event_id,title,speaker,topic,kind,capture_mode,created_at,updated_at) VALUES(?,?,?,?,?,'meeting',?,?,?)`)
-        .run(lectureId, eventId, title, String(body.participants || ''), String(body.topic || ''), mode, timestamp, timestamp);
+      db.prepare(`INSERT INTO lectures(id,event_id,title,speaker,topic,kind,capture_mode,caption_mode,created_at,updated_at) VALUES(?,?,?,?,?,'meeting',?,?,?,?)`)
+        .run(lectureId, eventId, title, String(body.participants || ''), String(body.topic || ''), mode, defaultCaptionMode(), timestamp, timestamp);
     }).immediate();
     return reply.code(201).send(mapLecture(db.prepare('SELECT * FROM lectures WHERE id=?').get(lectureId) as any));
   });

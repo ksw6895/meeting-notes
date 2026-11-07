@@ -180,7 +180,7 @@ describe('cache-friendly meeting input', () => {
     const developer = parts(input[0])[0];
     expect(developer.type).toBe('input_text');
     expect(developer.text.startsWith(notes.MEETING_EDITOR_RULES)).toBe(true);
-    expect(developer.text).toContain('회의: Meet + Luna');
+    expect(developer.text).toContain('제목: Meet + Luna');
     expect(developer.text).toContain('참가자 후보: 성우, 지민');
     expect(developer.text).toContain('자주 나올 이름·용어: 엔트레스토');
     expect(parts(input[1])[0].text.split('\n')).toHaveLength(11);

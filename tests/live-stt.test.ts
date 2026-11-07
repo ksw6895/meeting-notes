@@ -41,13 +41,13 @@ function tone(ms: number, amplitude = 8_000): Buffer {
 }
 const silence = (ms: number) => Buffer.alloc(Math.round(16 * ms) * 2);
 
-function makeRelay(glossary = "엔트레스토\n<성우>") {
+function makeRelay(glossary = "엔트레스토\n<성우>", translateTo?: "ko") {
   const socket = new FakeSocket();
   const messages: RelayMessage[] = [];
   const connect = vi.fn(() => socket);
   const relay = new live.OpenAiLiveRelay({
     eventId, lectureId, apiKey: "sk-test-never-sent", glossary, context: "회의: 주간 회의.",
-    emit: (message) => messages.push(message), connect
+    emit: (message) => messages.push(message), connect, translateTo
   });
   relays.push(relay);
   return { relay, socket, messages, connect };
@@ -100,7 +100,7 @@ describe("PCM helpers", () => {
 });
 
 describe("OpenAiLiveRelay", () => {
-  it("configures a Korean gpt-live-transcribe session without server VAD", () => {
+  it("configures a multilingual gpt-live-transcribe session without server VAD", () => {
     const { relay, socket, messages, connect } = makeRelay();
     relay.start();
     relay.start();
@@ -113,9 +113,65 @@ describe("OpenAiLiveRelay", () => {
     expect(update.session.type).toBe("transcription");
     expect(update.session.audio.input.format).toEqual({ type: "audio/pcm", rate: 24_000 });
     expect(update.session.audio.input.turn_detection).toBeNull();
-    expect(update.session.audio.input.transcription).toMatchObject({ model: "gpt-live-transcribe", languages: ["ko"], keywords: ["엔트레스토", "성우"] });
+    expect(update.session.audio.input.transcription).toMatchObject({ model: "gpt-live-transcribe", languages: ["ko", "en"], keywords: ["엔트레스토", "성우"] });
     expect(update.session.audio.input.transcription.prompt).toContain("주간 회의");
     expect(messages).toContainEqual({ type: "transcript_status", status: "connected" });
+  });
+
+  it("streams Korean text only after language confirmation and drains the translation tail", async () => {
+    const { relay, socket, messages } = makeRelay("", "ko");
+    relay.start();
+    socket.open();
+    expect(socket.sent[0]).toEqual({ type: "session.update", session: { audio: { output: { language: "ko" } } } });
+    relay.forward(silence(1_000));
+    expect(socket.sent).toHaveLength(1);
+    socket.message({ type: "session.updated" });
+    expect(Buffer.from(socket.of("session.input_audio_buffer.append")[0].audio, "base64")).toHaveLength(48_000);
+    socket.message({ type: "session.output_transcript.delta", delta: "온도는 " });
+    socket.message({ type: "session.output_transcript.delta", delta: "3.5" });
+    socket.message({ type: "session.input_transcript.delta", delta: "degrees" });
+    socket.message({ type: "session.output_audio.delta", delta: "AAAA" });
+    const stopping = relay.stop();
+    expect(socket.sent.at(-1)).toEqual({ type: "session.close" });
+    expect(socket.closed).toBe(0);
+    socket.message({ type: "session.output_transcript.delta", delta: "도입니다." });
+    socket.message({ type: "session.closed" });
+    await stopping;
+    expect(messages.filter(m => m.type === "translation_delta").map(m => m.text).join("")).toBe("온도는 3.5도입니다.");
+    const usage = db.prepare("SELECT kind,cost_usd FROM usage_ledger WHERE lecture_id=? AND model='gpt-realtime-translate' ORDER BY rowid DESC").get(lectureId) as any;
+    expect(usage.kind).toBe("translation");
+    expect(usage.cost_usd).toBeCloseTo(0.034 / 60);
+  });
+
+  it("resumes translation with current speech after an upstream outage", async () => {
+    const sockets = [new FakeSocket(), new FakeSocket()];
+    const messages: RelayMessage[] = [];
+    let next = 0;
+    const relay = new live.OpenAiLiveRelay({
+      eventId, lectureId, apiKey: "test", glossary: "", context: "", translateTo: "ko",
+      emit: m => messages.push(m), connect: () => sockets[next++]
+    });
+    relays.push(relay);
+    vi.useFakeTimers();
+    try {
+      relay.start();
+      sockets[0].open();
+      sockets[0].message({type:"session.updated"});
+      sockets[0].emit("close");
+      for (let i = 0; i < 30; i++) relay.forward(tone(1_000));
+      expect(messages.at(-1)).toMatchObject({status:"reconnecting"});
+      await vi.advanceTimersByTimeAsync(1_500);
+      sockets[1].open();
+      sockets[1].message({type:"session.updated"});
+      expect(sockets[1].of("session.input_audio_buffer.append")).toHaveLength(0);
+      relay.forward(silence(200));
+      expect(sockets[1].of("session.input_audio_buffer.append")).toHaveLength(1);
+      sockets[0].message({type:"session.output_transcript.delta",delta:"late"});
+      expect(messages).not.toContainEqual({type:"translation_delta",text:"late"});
+      const stop = relay.stop();
+      sockets[1].message({type:"session.closed"});
+      await stop;
+    } finally { vi.useRealTimers(); }
   });
 
   it("omits keywords when the glossary is empty", () => {

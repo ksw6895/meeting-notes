@@ -32,4 +32,4 @@
 
 - `npm test`(vitest), `npm run typecheck`(tsc), `npm run build`(vite), `npm run dev`
 - 서버는 `server/`(Fastify, better-sqlite3, ffmpeg-static), 화면은 `src/`(React). 녹음은 브라우저가 하고(`src/recorder.ts`), 서버는 WebSocket으로 받은 PCM을 디스크에 먼저 저장한 뒤 ACK합니다.
-- 모델: 받아쓰기 `gpt-transcribe`, 실시간 자막 `gpt-live-transcribe`, 회의록 `gpt-6.1-terra` 기본(`server/openai-notes.ts`에서 목록·단가 관리). 단가를 바꾸면 그 파일의 날짜 주석도 갱신하세요.
+- 모델: 받아쓰기 `gpt-transcribe`, 원문 자막 `gpt-live-transcribe`, 한국어 번역 자막 `gpt-realtime-translate`, 회의록 `gpt-6.1-terra` 기본(`server/openai-notes.ts`에서 목록·단가 관리). 단가를 바꾸면 그 파일의 날짜 주석도 갱신하세요.

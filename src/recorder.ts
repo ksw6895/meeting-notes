@@ -1,3 +1,4 @@
+import { isCaptionMode, type CaptionMode } from "../server/types.ts";
 const DATABASE_NAME = "lecture-note-recorder";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "audio-packets";
@@ -276,6 +277,8 @@ export class LectureRecorder {
   onWarning: (message: string) => void = () => {};
   onFatal: (message: string) => void = () => {};
   onBuffered: (milliseconds: number) => void = () => {};
+  onCaptionMode: (mode: CaptionMode) => void = () => {};
+  onTranslationDelta: (delta: string) => void = () => {};
   onTranscriptPartial: (text: string) => void = () => {};
   onTranscriptCommitted: (text: string) => void = () => {};
   onTranscriptStatus: (status: string, message?: string) => void = () => {};
@@ -418,7 +421,7 @@ export class LectureRecorder {
     socket.onopen = () => {
       if (this.socket !== socket || this.stopping) return;
       this.reconnectAttempts = 0;
-      socket.send(JSON.stringify({ type: "hello", sessionId: this.sessionId }));
+      socket.send(JSON.stringify({ type: "hello", sessionId: this.sessionId, liveFromSequence: this.sequence }));
     };
     socket.onmessage = (event) => { void this.handleMessage(event.data); };
     socket.onerror = () => {
@@ -466,6 +469,14 @@ export class LectureRecorder {
     }
     if (value?.type === "error") {
       this.lastServerError = String(value.error || "녹음 서버 연결 오류가 발생했습니다.");
+      return;
+    }
+    if (value?.type === "caption_mode" && isCaptionMode(value.mode)) {
+      this.onCaptionMode(value.mode);
+      return;
+    }
+    if (value?.type === "translation_delta" && typeof value.text === "string") {
+      this.onTranslationDelta(value.text);
       return;
     }
     if (value?.type === "transcript_partial" && typeof value.text === "string") {

@@ -1,3 +1,9 @@
+export type CaptionMode = "off" | "original" | "ko";
+
+export function isCaptionMode(value: unknown): value is CaptionMode {
+  return value === "off" || value === "original" || value === "ko";
+}
+
 export type EventStatus = "active" | "archived";
 export type LectureStatus = "draft" | "recording" | "paused" | "processing" | "complete";
 export type ChunkStatus = "pending" | "processing" | "done" | "failed" | "budget_blocked";
@@ -75,7 +81,7 @@ export interface UsageLedger {
   lectureId: string;
   provider: "openai";
   model: string;
-  kind: "transcription" | "live_note" | "final_note" | "event_note";
+  kind: "transcription" | "translation" | "live_note" | "final_note" | "event_note";
   inputUnits: number;
   outputUnits: number;
   costUsd: number;

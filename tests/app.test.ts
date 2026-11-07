@@ -54,6 +54,25 @@ describe("text and audio utilities", () => {
 });
 
 describe("meeting lifecycle routes", () => {
+  it("snapshots the caption default and persists each recording's choice", async () => {
+    const create = async () => (await app.inject({method: "POST", url: "/api/meetings", payload: {title: "발표"}})).json();
+    const settings = await import("../server/db.ts");
+    const original = settings.getSetting("realtime_stt_enabled");
+    try {
+      settings.setSetting("realtime_stt_enabled","false");
+      const first = await create();
+      expect(first.captionMode).toBe("off");
+      settings.setSetting("realtime_stt_enabled","true");
+      expect((await create()).captionMode).toBe("original");
+      const change = (mode: string) => app.inject({method:"PUT",url:`/api/meetings/${first.id}/captions`,payload:{mode}});
+      expect((await change("ko")).statusCode).toBe(200);
+      expect((await change("garbage")).statusCode).toBe(400);
+      expect((await app.inject({url:`/api/lectures/${first.id}`})).json().captionMode).toBe("ko");
+      db.prepare("UPDATE lectures SET status='complete' WHERE id=?").run(first.id);
+      expect((await change("off")).statusCode).toBe(409);
+    } finally { settings.setSetting("realtime_stt_enabled",original); }
+  });
+
   it("validates the meeting title and normalizes the capture mode", async () => {
     expect((await app.inject({ method: "POST", url: "/api/meetings", payload: { title: "  " } })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: "/api/meetings", payload: { title: "가".repeat(301) } })).statusCode).toBe(400);

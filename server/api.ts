@@ -9,6 +9,7 @@ import { NOTE_MODEL_IDS } from "./notes.ts";
 import { OPENAI_NOTE_MODELS } from "./openai-notes.ts";
 import { getLatestTranscriptContext, kickQueue, retryChunk, wakeQueue } from "./queue.ts";
 import { noteJobs, retryNotes } from "./note-jobs.ts";
+import { isCaptionMode, type CaptionMode } from "./types.ts";
 import { OpenAiLiveRelay } from "./live-stt.ts";
 import { STT_MODEL, LIVE_STT_MODEL } from "./stt.ts";
 import { clampNumber, formatTimestamp, id, now, safeFilename } from "./utils.ts";
@@ -313,6 +314,21 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return reply.send(content);
   });
 
+  const activeCaptions = new Map<string, (mode: CaptionMode) => void>();
+  app.put("/api/meetings/:lectureId/captions", async (request, reply) => {
+    const { lectureId } = request.params as { lectureId: string };
+    const mode = (request.body as { mode?: unknown } | null)?.mode;
+    if (!isCaptionMode(mode)) return reply.code(400).send({ error: "자막 선택을 확인하세요." });
+    const row = requireRow(db.prepare("SELECT status,caption_mode FROM lectures WHERE id=?").get(lectureId) as
+      { status: string; caption_mode: CaptionMode } | undefined, "녹음을 찾을 수 없습니다.");
+    if (!["draft", "paused", "recording"].includes(row.status)) throw conflict("종료한 녹음의 자막은 바꿀 수 없습니다.");
+    if (row.caption_mode !== mode) {
+      db.prepare("UPDATE lectures SET caption_mode=?,updated_at=? WHERE id=?").run(mode, now(), lectureId);
+      activeCaptions.get(lectureId)?.(mode);
+    }
+    return { captionMode: mode };
+  });
+
   app.get("/ws/audio/:lectureId", { websocket: true }, (socket, request) => {
     const { lectureId } = request.params as any;
     const lecture = db.prepare(`
@@ -324,15 +340,47 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     }
     let lease: ReturnType<typeof acquireAudioWriter> | undefined;
     let realtimeRelay: Promise<OpenAiLiveRelay | null> | undefined;
+    let generation = 0;
+    let liveFromSequence = 0;
     let ownerId = "";
     let released = false;
     const sendLocal = (message: object) => {
       if (socket.readyState === 1) socket.send(JSON.stringify(message));
     };
+    const stopCaptions = () => {
+      generation++;
+      if (realtimeRelay) void realtimeRelay.then((relay) => relay?.stop()).catch(() => undefined);
+      realtimeRelay = undefined;
+    };
+    const selectCaptions = (mode: CaptionMode) => {
+      stopCaptions();
+      const current = generation;
+      sendLocal({ type: "caption_mode", mode });
+      if (mode === "off") return;
+      realtimeRelay = getSecret("openai").then((apiKey) => {
+        if (generation !== current) return null;
+        if (!apiKey) {
+          sendLocal({ type: "transcript_status", status: "missing_key", message: "OpenAI API 키가 없어 자막 없이 녹음합니다." });
+          return null;
+        }
+        const relay = new OpenAiLiveRelay({
+          eventId: lecture.event_id, lectureId, apiKey, glossary: String(lecture.glossary || ""),
+          context: `제목: ${lecture.title}. 배경: ${lecture.topic || ""}. 직전 발언: ${getLatestTranscriptContext(lectureId).slice(-300)}`,
+          translateTo: mode === "ko" ? "ko" : undefined,
+          emit: (message) => { if (generation === current) sendLocal(message); }
+        });
+        relay.start();
+        return relay;
+      }).catch(() => {
+        if (generation === current) sendLocal({ type: "transcript_status", status: "disabled", message: "실시간 자막을 연결하지 못했습니다. 녹음은 계속됩니다." });
+        return null;
+      });
+    };
     const release = () => {
       if (released) return;
       released = true;
-      if (realtimeRelay) void realtimeRelay.then((relay) => relay?.stop()).catch(() => undefined);
+      if (activeCaptions.get(lectureId) === selectCaptions) activeCaptions.delete(lectureId);
+      stopCaptions();
       lease?.release();
     };
     socket.on("message", (data: Buffer, isBinary: boolean) => {
@@ -343,26 +391,10 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
           if (lease) throw new Error("녹음 hello는 한 번만 보낼 수 있습니다.");
           ownerId = hello.sessionId.trim();
           lease = acquireAudioWriter(lectureId, ownerId);
-          if (getSettingsBase().realtimeSttEnabled) {
-            realtimeRelay = getSecret("openai").then((apiKey) => {
-              if (!apiKey || released) {
-                if (!apiKey) sendLocal({ type: "transcript_status", status: "missing_key", message: "OpenAI API 키가 없어 실시간 자막 없이 녹음합니다." });
-                return null;
-              }
-              const relay = new OpenAiLiveRelay({
-                eventId: lecture.event_id,
-                lectureId,
-                apiKey,
-                glossary: String(lecture.glossary || ""),
-                context: `회의: ${lecture.title}. 안건: ${lecture.topic || ""}. 직전 발언: ${getLatestTranscriptContext(lectureId).slice(-300)}`,
-                emit: sendLocal
-              });
-              relay.start();
-              return relay;
-            });
-          } else {
-            sendLocal({ type: "transcript_status", status: "batch_only" });
-          }
+          liveFromSequence = Number.isSafeInteger(hello.liveFromSequence) ? Math.max(0, hello.liveFromSequence) : 0;
+          activeCaptions.get(lectureId)?.("off");
+          activeCaptions.set(lectureId, selectCaptions);
+          selectCaptions((db.prepare("SELECT caption_mode FROM lectures WHERE id=?").get(lectureId) as { caption_mode: CaptionMode }).caption_mode);
           sendLocal({ type: "ready", sessionId: ownerId, recordedMs: lease.writer.durationMs });
           return;
         }
@@ -371,8 +403,9 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         const result = lease.writer.appendPacketDurable(packet.sessionId, packet.sequence, packet.pcm);
         sendLocal({ type: "ack", sessionId: packet.sessionId, sequence: packet.sequence, accepted: result.accepted, recordedMs: lease.writer.durationMs });
         // Only this connection's fresh audio feeds the live preview; replayed backlog does not.
-        if (result.accepted && realtimeRelay && packet.sessionId === ownerId) {
-          void realtimeRelay.then((relay) => relay?.forward(packet.pcm)).catch(() => undefined);
+        if (result.accepted && realtimeRelay && packet.sessionId === ownerId && packet.sequence >= liveFromSequence) {
+          const current = generation;
+          void realtimeRelay.then((relay) => { if (generation === current) relay?.forward(packet.pcm); }).catch(() => undefined);
         }
       } catch (error) {
         sendLocal({ type: "error", error: error instanceof Error ? error.message : "오디오 처리 오류" });

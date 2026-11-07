@@ -71,7 +71,7 @@ describe("prepareAudio", () => {
 });
 
 describe("transcribeAudio", () => {
-  it("posts multipart gpt-transcribe with Korean, the prompt and filtered keywords", async () => {
+  it("posts multipart gpt-transcribe with Korean and English hints, the prompt and filtered keywords", async () => {
     const fetchMock = vi.fn(async (..._args: [string, RequestInit]) => okResponse());
     vi.stubGlobal("fetch", fetchMock);
     const result = await stt.transcribeAudio({
@@ -87,7 +87,7 @@ describe("transcribeAudio", () => {
     expect(form).toBeInstanceOf(FormData);
     expect(form.get("model")).toBe("gpt-transcribe");
     expect(form.get("response_format")).toBe("json");
-    expect(form.getAll("languages[]")).toEqual(["ko"]);
+    expect(form.getAll("languages[]")).toEqual(["ko", "en"]);
     expect(form.get("prompt")).toBe("한국어 회의입니다. 직전 발언: 안녕하세요");
     expect(form.getAll("keywords[]")).toEqual(["엔트레스토", "b성우/b"]);
     for (const keyword of form.getAll("keywords[]")) expect(String(keyword)).not.toMatch(/[<>\n]/);

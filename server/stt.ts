@@ -9,6 +9,9 @@ export const STT_MODEL = "gpt-transcribe" as const;
 export const STT_USD_PER_MINUTE = 0.0045;
 export const LIVE_STT_MODEL = "gpt-live-transcribe" as const;
 export const LIVE_STT_USD_PER_MINUTE = 0.017;
+export const EXPECTED_LANGUAGES = ["ko", "en"] as const;
+export const TRANSLATION_MODEL = "gpt-realtime-translate" as const;
+export const TRANSLATION_USD_PER_MINUTE = 0.034;
 export type SttModel = typeof STT_MODEL;
 
 export interface SttResult {
@@ -125,7 +128,7 @@ export async function transcribeAudio(input: TranscribeAudioInput): Promise<SttR
     form.append("file", new Blob([bytes], { type: "audio/wav" }), "chunk.wav");
     form.append("model", STT_MODEL);
     form.append("response_format", "json");
-    form.append("languages[]", "ko");
+    for (const language of EXPECTED_LANGUAGES) form.append("languages[]", language);
     if (input.prompt.trim()) form.append("prompt", input.prompt.slice(0, 2000));
     for (const keyword of keywords) form.append("keywords[]", keyword);
     const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {

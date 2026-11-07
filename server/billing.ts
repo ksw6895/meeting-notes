@@ -2,7 +2,7 @@ import { db, eventCostUsd } from "./db.ts";
 import { id, now } from "./utils.ts";
 
 export type UsageProvider = "openai";
-export type UsageKind = "transcription" | "live_note" | "final_note" | "event_note";
+export type UsageKind = "transcription" | "translation" | "live_note" | "final_note" | "event_note";
 
 export interface UsageRates {
   input: number;

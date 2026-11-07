@@ -101,7 +101,7 @@ export async function processChunk(chunk: any, signal?: AbortSignal): Promise<vo
     const previousText = getLatestTranscriptContext(chunk.lecture_id);
     previous = previousText ? { text: previousText } : undefined;
     // Several people around one microphone: hint at overlapping, conversational speech.
-    const prompt = `여러 사람이 한 마이크 앞에서 나누는 한국어 회의 대화입니다. 회의: ${chunk.lecture_title}. 안건: ${chunk.lecture_topic || "미입력"}. 직전 발언: ${(previous?.text || "").slice(-600)}`;
+    const prompt = `Transcribe in the original spoken language, including names, numbers and negations. Title: ${chunk.lecture_title}. 안건: ${chunk.lecture_topic || "미입력"}. 직전 발언: ${(previous?.text || "").slice(-600)}`;
     const filePath = resolveAudioPath(String(chunk.wav_path || chunk.flac_path || ""));
     result = await transcribeAudio({
       apiKey,

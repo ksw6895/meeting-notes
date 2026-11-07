@@ -107,7 +107,7 @@ describe("source links and markdown", () => {
     const markdown = renderFinalMarkdown(data, { participants: "성우, 지민", recordedMs: 30_000 }, [{ lectureId, lectureTitle: "보안·내보내기 회의", segmentId: "first-segment", startMs: 0, endMs: 30_000 }]);
     expect(markdown).toContain("# 노트");
     expect(markdown).toContain("> 참가자: 성우, 지민 · 녹음: 00:30");
-    expect(markdown).toContain("## 결정 사항");
+    expect(markdown).toContain("## 핵심 내용");
     expect(markdown).toContain(`- 주장 — [00:00–00:30](#source-${lectureId}-first-segment)`);
     expect(markdown).toContain("| 할 일 | 담당 | 기한 | 근거 |");
     expect(markdown).toContain("A\\|B");

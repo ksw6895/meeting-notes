@@ -182,6 +182,64 @@ describe("durable audio packet journal", () => {
     await app.close();
   });
 
+  it("switches captions on one recording socket and keeps every original PCM packet", async () => {
+    const { buildApp } = await import("../server/app.ts");
+    const { OpenAiLiveRelay } = await import("../server/live-stt.ts");
+    const app = await buildApp({ staticFiles: false, port: 0 });
+    const id = "caption-switch";
+    db.prepare("INSERT INTO lectures(id,event_id,title,status,created_at,updated_at) VALUES(?,?,?,'recording','x','x')").run(id,eventId,id);
+    const start = vi.spyOn(OpenAiLiveRelay.prototype,"start").mockImplementation(() => {});
+    const forwarded = vi.spyOn(OpenAiLiveRelay.prototype,"forward").mockImplementation(() => {});
+    const stop = vi.spyOn(OpenAiLiveRelay.prototype,"stop").mockResolvedValue();
+    vi.stubEnv("OPENAI_API_KEY","test-never-sent");
+    let socket: WebSocket | undefined;
+    try {
+      await app.listen({host:"127.0.0.1",port:0});
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("no port");
+      socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws/audio/${id}`);
+      const inbox = collector(socket);
+      await opened(socket);
+      socket.send(JSON.stringify({type:"hello",sessionId:"capture",liveFromSequence:1}));
+      expect(await inbox.next("caption_mode")).toMatchObject({mode:"original"});
+      await inbox.next("ready");
+      const originals: Buffer[] = [];
+      const packet = async () => {
+        const sequence = originals.length;
+        const pcm = Buffer.alloc(32000,sequence+1);
+        originals.push(pcm);
+        socket!.send(makePacket("capture",sequence,pcm));
+        expect(await inbox.next("ack")).toMatchObject({sequence,accepted:true});
+      };
+      const change = async (mode: string) => {
+        expect((await app.inject({method:"PUT",url:`/api/meetings/${id}/captions`,payload:{mode}})).statusCode).toBe(200);
+        expect(await inbox.next("caption_mode")).toMatchObject({mode});
+      };
+      await packet(); // Missed while the browser was reconnecting: save it without live replay.
+      await packet();
+      await change("ko");
+      await packet();
+      await change("off");
+      await packet();
+      await change("ko");
+      await packet();
+      expect(start).toHaveBeenCalledTimes(3);
+      expect(stop).toHaveBeenCalledTimes(2);
+      expect(forwarded.mock.calls.map(([pcm])=>pcm[0])).toEqual([2,3,5]);
+      expect(new Set(forwarded.mock.contexts).size).toBe(3);
+      const bytes = fs.readFileSync(path.join(tempDir,"audio",id,"recording.pcm"));
+      expect(bytes.equals(Buffer.concat(originals))).toBe(true);
+    } finally {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const closed = new Promise(resolve => socket!.once("close",resolve));
+        socket.close(); await closed;
+      }
+      await app.close();
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("refuses a websocket for a meeting that is not recording and rejects audio before hello", async () => {
     const { buildApp } = await import("../server/app.ts");
     const app = await buildApp({ staticFiles: false, port: 0 });

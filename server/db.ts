@@ -145,9 +145,14 @@ const lectureColumns = new Set((db.prepare("PRAGMA table_info(lectures)").all() 
 for (const [column, definition] of Object.entries({
   kind: "TEXT NOT NULL DEFAULT 'meeting'",
   capture_mode: "TEXT NOT NULL DEFAULT 'room'",
+  caption_mode: `TEXT NOT NULL DEFAULT '${defaultCaptionMode()}'`,
   note_status: "TEXT NOT NULL DEFAULT 'idle'",
   note_error: "TEXT NOT NULL DEFAULT ''"
 })) if (!lectureColumns.has(column)) db.exec(`ALTER TABLE lectures ADD COLUMN ${column} ${definition}`);
+
+export function defaultCaptionMode() {
+  return getSetting("realtime_stt_enabled") === "false" ? "off" : "original";
+}
 
 export function getSetting(key: string): string {
   return (db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value ?? defaults[key] ?? "";
@@ -198,6 +203,7 @@ export function mapLecture(row: Record<string, unknown>) {
     speaker: row.speaker,
     kind: row.kind,
     captureMode: row.capture_mode,
+    captionMode: row.caption_mode,
     noteStatus: row.note_status,
     noteError: row.note_error,
     topic: row.topic,

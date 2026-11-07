@@ -1,4 +1,7 @@
+import type { CaptionMode } from "../server/types.ts";
+
 export interface Lecture {
+  captionMode: CaptionMode;
   id: string; eventId: string; title: string; speaker: string; topic: string;
   status: "draft" | "recording" | "paused" | "processing" | "complete";
   recordedMs: number; analyzedUntilMs: number; finalNote: string; createdAt: string; updatedAt: string;
